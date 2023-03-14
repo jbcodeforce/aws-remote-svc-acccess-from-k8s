@@ -26,19 +26,19 @@ Any users must permission to make calls to the `ecr:GetAuthorizationToken` API t
 
 So create a IAM Policy:
 
-    ```json
-    {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "ecrauthorization",
-                "Effect": "Allow",
-                "Action": "ecr:GetAuthorizationToken",
-                "Resource": "*"
-            }
-        ]
-    }
-    ```
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "ecrauthorization",
+            "Effect": "Allow",
+            "Action": "ecr:GetAuthorizationToken",
+            "Resource": "*"
+        }
+    ]
+}
+```
 
 Finally be sure to authorize pull action on the image repository you want the user to access (see next session for repository policy).
 
@@ -68,13 +68,13 @@ A developer or CI/CD pipeline can push image to the registry/repository using th
     # use a specific IAM user: like ecruser using the access key and secret
     aws configure 
     aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com
-    # The following command should fails
+    # The following command should fail
     docker pull <accountID>.dkr.ecr.us-west-2.amazonaws.com/jbcodeforce/autonomous-car-ride
     # with error like
-    # denied: User: arn:aws:iam::403993201276:user/ecruser is not authorized to perform: ecr:BatchGetImage on resource:
+    # denied: User: arn:aws:iam::403993201276:user/ecruser is not authorized to perform: ecr:BatchGetImage on resource...
     ```
 
-1. Be sure to have one ECR repository policy to authorize the `ecruser` user to pull image. This may be done in the ECR AWS console, repositories view, and add permissions
+1. Be sure to have one ECR repository policy to authorize the `ecruser` user to pull the expected image. This may be done in the ECR AWS console, repositories view, and add permissions to one of the repository:
 
     ```json
     {
@@ -97,7 +97,13 @@ A developer or CI/CD pipeline can push image to the registry/repository using th
     }
     ```
 
-[See policy examples in the product documentation](https://docs.aws.amazon.com/AmazonECR/latest/userguide/repository-policy-examples.html).
+    [See policy examples in the product documentation](https://docs.aws.amazon.com/AmazonECR/latest/userguide/repository-policy-examples.html).
+
+1. Pull image
+
+    ```sh
+     docker pull <accountID>.dkr.ecr.us-west-2.amazonaws.com/jbcodeforce/autonomous-car-ride
+     ```
 
 ### ECR access with code
 
@@ -110,13 +116,25 @@ TOKEN=$(aws ecr get-authorization-token --output text --query 'authorizationData
 curl -i -H "Authorization: Basic $TOKEN" https://<myaccountID>.dkr.ecr.us-west-2.amazonaws.com/v2/jbcodeforce/java-lambda/tags/list
 ```
 
+* There is no API to pull an image.
 
 
 ### ECR access from remote Kubernetes
 
-To access a remote registry, Kubernetes cluster uses the Secret of `kubernetes.io/dockerconfigjson` type to authenticate to it and to pull a private image. The secret can be in the needed namespace. The `.dockerconfigjson` is the base64 encrypted version of the docker `config.json` file:
+To access a remote registry, Kubernetes cluster uses the Secret of `kubernetes.io/dockerconfigjson` type to authenticate to it and to pull a private image. The secret can be define in a specific namespace. The `.dockerconfigjson` is the base64 encrypted version of the docker `config.json` file:
+
+```json
+{
+	"auths": {
+		"40.....dkr.ecr.us-west-2.amazonaws.com": {},
+		"https://index.docker.io/v1/": {}
+	}
 
 ```
+* command to encrypt the docker config file.
+
+```sh
+cat ~/.docker/config.json| base64
 ```
 
 Here is the secret:
@@ -132,8 +150,64 @@ data:
 type: kubernetes.io/dockerconfigjson
 ```
 
+* A better solution is to use kubectl, combined with Temporary Token:
+
+```sh
+export REGISTRY_SERVER=https://403.....dkr.ecr.us-west-2.amazonaws.com
+export TOKEN=$(aws ecr get-authorization-token --output text --query 'authorizationData[].authorizationToken') 
+export EMAIL=youremail
+kubectl create secret docker-registry awsecr --docker-server=$REGISTRY_SERVER --docker-username=AWS --docker-password=$TOKEN --docker-email=$EMAIL
+```
+
+The secret will work for 12 hours. If the security requirements do not enforce changing often then use the IAM user and access key to create the secret:
+
+```sh
+export PWD=secertkeyofiamuser
+export EMAIL=youremail
+kubectl create secret docker-registry awsecr --docker-server=$REGISTRY_SERVER --docker-username=ecruser --docker-password=$PWD--docker-email=$EMAIL
+```
+
+* Verify it
+
+```sh
+kubectl describe secret awsecr
+Name:         awsecr
+Namespace:    default
+Labels:       <none>
+Annotations:  <none>
+
+Type:  kubernetes.io/dockerconfigjson
+
+Data
+====
+.dockerconfigjson:  298 bytes
+```
+
+See [Kubernetes documentation](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/).
+
+Once done define a deployment.yaml or a pod.yaml file with the image name referencing the full path to the ECR private registry.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tenant
+spec:
+  containers:
+  - name: private-reg-container
+    image: 403993201276.dkr.ecr.us-west-2.amazonaws.com/jbcodeforce/demo-saas-tenant-mgr:latest
+  imagePullSecrets:
+  - name: awsecr
+```
+
+Try these with [killercoda - kubernetes](https://killercoda.com/kubernetes).
+
 ## Other things to consider
 
 * If we need to use image encryption then the public KMS key needs to be in the Kubernetes cluster to be able to decrypt the image.
 
 ## Access from pod to S3
+
+This is the second example on how to access AWS resources from a running pod inside of a remote Kubernetes platform, not running on AWS.
+
+The main approach is to use the [IAM Role Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html) capability.
