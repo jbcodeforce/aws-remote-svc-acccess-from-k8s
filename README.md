@@ -16,53 +16,124 @@ Recall that ECR has the following components: A registry that is private and uni
 
 ![](./docs/diagrams/ecr-components.drawio.png)
 
-Any client must authenticate to Amazon ECR registries as an AWS user before it can push and pull images. Access control policies can be defined using repository policies.
+Any client must authenticate to Amazon ECR private registries as an AWS user before it can push and pull images. Access control policies must be defined to grant access to private repositories via API.
 
-A developer or CI/CD pipeline can push image to the registry/repository using the docker CLI, but he/she needs to be authenticated. The AWS CLI provides a `get-login-password` command to simplify the authentication process. 
+Amazon ECR provides several managed policies to control user access. It uses resource-based permissions.
 
-Here is an example to use a logged user:
+Amazon ECR repository policies and IAM policies are used when determining which actions a specific user or role may perform on a repository.
 
-```sh
-# use a specific IAM user
-aws configure 
-aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com
-# then 
-docker push amazonaws.com/jbcodeforce/autonomous-car-ride:latest
-# or 
-docker push
-```
+Any users must permission to make calls to the `ecr:GetAuthorizationToken` API through an IAM policy before they can authenticate to a registry and push or pull any images from any Amazon ECR repository. 
 
-Code can also use AWS API.
+So create a IAM Policy:
+
+    ```json
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "ecrauthorization",
+                "Effect": "Allow",
+                "Action": "ecr:GetAuthorizationToken",
+                "Resource": "*"
+            }
+        ]
+    }
+    ```
+
+Finally be sure to authorize pull action on the image repository you want the user to access (see next session for repository policy).
 
 ### ECR access using IAM user
 
-Amazon's Elastic Container Repository (ECR) allows you to push and pull images to a private repository inside your AWS account.
-Using AWS CLI, Docker and AWS account we can download a container image from our private registry. The following diagram illustrates what we can do
+Using AWS CLI, Docker and AWS account, we can download a container image from our private registry. The following diagram illustrates what we can do:
 
 ![](./docs/diagrams/ecr-from-laptop.drawio.png)
 
-1. Create a Policy
+A developer or CI/CD pipeline can push image to the registry/repository using the docker CLI, but he/she needs to be authenticated. An authentication token is used to access any Amazon ECR registry that your IAM principal has access to and is valid for 12 hours. 
 
-Allow the action to get an authorization token to access ECR registries.
+1. Create a IAM user: `ecruser` and attach the ECR policy created above to it:
 
-```json
-{
+    ![](./docs/images/ecruser.jpg)
+
+    We can add an access key to the created user, so we can test the next steps with AWS CLI.
+
+1. Get the authorization token
+
+    An authorization token represents the IAM authentication credentials and can be used to access any Amazon ECR registry that our IAM principal has access to. The authorization token is valid for 12 hours. To obtain an authorization token, we must use the `GetAuthorizationToken` API operation to retrieve a base64-encoded authorization token containing the username AWS and an encoded password.
+
+    The AWS CLI provides a `get-login-password` command to simplify this authentication process. This command returns a temporary access token. 
+
+    Here is an example to use a logged admin user (who create the ECR registry):
+
+    ```sh
+    # use a specific IAM user: like ecruser using the access key and secret
+    aws configure 
+    aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com
+    # The following command should fails
+    docker pull <accountID>.dkr.ecr.us-west-2.amazonaws.com/jbcodeforce/autonomous-car-ride
+    # with error like
+    # denied: User: arn:aws:iam::403993201276:user/ecruser is not authorized to perform: ecr:BatchGetImage on resource:
+    ```
+
+1. Be sure to have one ECR repository policy to authorize the `ecruser` user to pull image. This may be done in the ECR AWS console, repositories view, and add permissions
+
+    ```json
+    {
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "ecrauthorization",
-            "Effect": "Allow",
-            "Action": "ecr:GetAuthorizationToken",
-            "Resource": "*"
+        "Sid": "new statement",
+        "Effect": "Allow",
+        "Principal": {
+            "AWS": "arn:aws:iam::4....:user/ecruser"
+        },
+        "Action": [
+            "ecr:BatchCheckLayerAvailability",
+            "ecr:BatchGetImage",
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:ListImages"
+        ]
         }
     ]
-}
-```
+    }
+    ```
 
-Retrieves an authorization token. An authorization token represents your IAM authentication credentials and can be used to access any Amazon ECR registry that your IAM principal has access to. The authorization token is valid for 12 hours.
+[See policy examples in the product documentation](https://docs.aws.amazon.com/AmazonECR/latest/userguide/repository-policy-examples.html).
 
 ### ECR access with code
 
+To make HTTPS call to AWS services, we need to get temporary security credentials from the AWS Security Token Service (AWS STS).
+
+* Example of calling ECR API to get the list of tags for a repository, using a temporary authorization token:
+
+```sh
+TOKEN=$(aws ecr get-authorization-token --output text --query 'authorizationData[].authorizationToken') 
+curl -i -H "Authorization: Basic $TOKEN" https://<myaccountID>.dkr.ecr.us-west-2.amazonaws.com/v2/jbcodeforce/java-lambda/tags/list
+```
+
+
+
 ### ECR access from remote Kubernetes
+
+To access a remote registry, Kubernetes cluster uses the Secret of `kubernetes.io/dockerconfigjson` type to authenticate to it and to pull a private image. The secret can be in the needed namespace. The `.dockerconfigjson` is the base64 encrypted version of the docker `config.json` file:
+
+```
+```
+
+Here is the secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ecrregistrykey
+  namespace: yourspecialns
+data:
+  .dockerconfigjson: Um....
+type: kubernetes.io/dockerconfigjson
+```
+
+## Other things to consider
+
+* If we need to use image encryption then the public KMS key needs to be in the Kubernetes cluster to be able to decrypt the image.
 
 ## Access from pod to S3
