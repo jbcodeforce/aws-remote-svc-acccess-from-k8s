@@ -2,21 +2,23 @@
 
 ## Problems
 
-We want to access a remote AWS service like ECR to get an image scheduled to a Kubernetes cluster running in another cloud. The problem is how to access to the docker image persisted in private ECR registry so the pod can be created:
+We want to access a remote AWS service like ECR to get an image scheduled to a Kubernetes cluster running in another cloud and access AWS services from a running app within Kubernetes. 
+
+So the first problem is to demonstrate, how to access to the ECR registry to download so the pod can be created:
 
 ![](./docs/diagrams/general-concept.drawio.png)
 
-The second challenge is how to access any AWS service, like S3, from pods running on remote Kubernetes running on another cloud provider. 
+Then the second challenge is how to access any AWS service, like S3, from pods running on remote Kubernetes running on another cloud provider. 
 
 All communications are over public internet.
 
 ## Demonstration preparation
 
-As a pre-requisite you can build a docker image from the [simple python program]() that will be deploy on your Kubernetes cluster and it will list the S3 buckets in your account. The code source is in the `src` folder. 
+As a pre-requisite you can build a docker image from the [simple python program](https://github.com/jbcodeforce/aws-remote-svc-acccess-from-k8s/blob/main/src/app.py) that will be deployed on your Kubernetes cluster and it will list the S3 buckets in your account. The code is using environment variables to get credentials to access AWS and identify as a user or role. Those variables are defined as Secret in k8s.
 
-You can prepare for the demonstration using a set of elements from this repository but see the next sectons for more details:
+You can prepare the demonstration using the set of elements from this repository but see the next sections for more details.
 
-* We assume you have aws CLI and you configured your access to AWS. You should set the temporary access token, access key id and access key secret in environment variables
+* We assume you have AWS CLI and you configured your access to AWS. You should set the temporary access token, access key id and access key secret in environment variables
 
   ```sh
   export AWS_ACCESS_KEY_ID=AS....EM
@@ -24,7 +26,7 @@ You can prepare for the demonstration using a set of elements from this reposito
   export AWS_SESSION_TOKEN=IQoJ......v02SJ
   ```
 
-* Run CDK to create IAM user, Policy, ECR repository. for that use the script and custom image:
+* Run CDK to create IAM user, Policy, ECR repository. For that use the script and custom image:
 
   ```sh
   # under cdk folder
@@ -41,7 +43,7 @@ You can prepare for the demonstration using a set of elements from this reposito
 
   ```sh
   cd src
-  docker build -t your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com/jbcodeforce/s3bucketlist .
+  docker build -t your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com/s3bucketlist .
   ```
 
 * Login to docker: (change `your_aws_account_id` below)
@@ -54,7 +56,7 @@ You can prepare for the demonstration using a set of elements from this reposito
 * Push the image that we will use later to test kubernetes to S3 connection: (change `your_aws_account_id` below)
 
   ```sh
-  docker push your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com/jbcodeforce/s3bucketlist
+  docker push your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com/s3bucketlist
   ```
 
 
@@ -70,9 +72,9 @@ Amazon ECR provides several managed policies to control user access. It uses res
 
 Amazon ECR repository policies and IAM policies are used when determining which actions a specific user or role may perform on a repository.
 
-Any users must permission to make calls to the `ecr:GetAuthorizationToken` API through an IAM policy before they can authenticate to a registry and push or pull any images from any Amazon ECR repository. 
+Any users must get permission to make calls to the `ecr:GetAuthorizationToken` API through an IAM policy before they can authenticate to a registry and push or pull any images from any Amazon ECR repository. 
 
-So create a IAM Policy:
+The IAM Policy looks like:
 
 ```json
 {
@@ -87,6 +89,8 @@ So create a IAM Policy:
     ]
 }
 ```
+
+The CDK is creating this policy.
 
 Finally be sure to authorize pull action on the image repository you want the user to access (see next session for repository policy).
 
@@ -113,7 +117,7 @@ A developer or CI/CD pipeline can push image to the registry/repository using th
     Here is an example to use a logged admin user (who create the ECR registry):
 
     ```sh
-    # use a specific IAM user: like ecruser using the access key and secret
+    # use a specific IAM user: like ecruser using the access key and secret key
     aws configure 
     aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com
     # The following command should fail
@@ -169,7 +173,7 @@ curl -i -H "Authorization: Basic $TOKEN" https://<myaccountID>.dkr.ecr.us-west-2
 
 ### ECR access from remote Kubernetes
 
-To access a remote registry, Kubernetes cluster uses the Secret of `kubernetes.io/dockerconfigjson` type to authenticate to it and to pull a private image. The secret can be define in a specific namespace. The `.dockerconfigjson` is the base64 encrypted version of the docker `config.json` file:
+To access a remote registry, Kubernetes cluster uses the Secret of `kubernetes.io/dockerconfigjson` type to authenticate to the remote registry and to pull a private image from. The secret can be defined in any namespace. The `.dockerconfigjson` is the base64 encrypted version of the docker `config.json` file, which looks like:
 
 ```json
 {
@@ -179,13 +183,14 @@ To access a remote registry, Kubernetes cluster uses the Secret of `kubernetes.i
 	}
 
 ```
-* command to encrypt the docker config file.
+
+* The command to encrypt the docker config file:
 
 ```sh
 cat ~/.docker/config.json| base64
 ```
 
-Here is the secret:
+Here is the secret with the generated string as `.data.dockerconfigjson`:
 
 ```yaml
 apiVersion: v1
@@ -198,7 +203,7 @@ data:
 type: kubernetes.io/dockerconfigjson
 ```
 
-* A better solution is to use kubectl, combined with Temporary Token:
+* A better solution is to use `kubectl`, combined with Temporary Authorization Token:
 
 ```sh
 export REGISTRY_SERVER=https://403.....dkr.ecr.us-west-2.amazonaws.com
@@ -207,7 +212,7 @@ export EMAIL=youremail
 kubectl create secret docker-registry awsecr --docker-server=$REGISTRY_SERVER --docker-username=AWS --docker-password=$TOKEN --docker-email=$EMAIL
 ```
 
-The secret will work for 12 hours. If the security requirements do not enforce changing often then use the IAM user and access key to create the secret:
+The secret will work for 12 hours. If your security requirements do not enforce changing the token as often then use the IAM user with access key and secret to create this Kubernetes Secret:
 
 ```sh
 export PWD=secertkeyofiamuser
@@ -233,7 +238,7 @@ Data
 
 See [Kubernetes documentation](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/).
 
-Once done define a deployment.yaml or a pod.yaml file with the image name referencing the full path to the ECR private registry.
+Once done, define a `pod.yaml` or a deployment.yaml file with the image name referencing the full path to the ECR private registry.
 
 ```yaml
 apiVersion: v1
@@ -248,7 +253,9 @@ spec:
   - name: awsecr
 ```
 
-Try these with [killercoda - kubernetes](https://killercoda.com/kubernetes).
+The `imagePullSecrets` element references the Secret name to get the credentials to access the registry.
+
+Try these with [killercoda - kubernetes](https://killercoda.com/kubernetes) or Minikube.
 
 ## Other things to consider
 
@@ -258,4 +265,27 @@ Try these with [killercoda - kubernetes](https://killercoda.com/kubernetes).
 
 This is the second example on how to access AWS resources from a running pod inside of a remote Kubernetes platform, not running on AWS.
 
-The main approach is to use the [IAM Role Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html) capability.
+Basically the pod will use environment variables with access key, secret and temporary token. Those are saved in another secret and loaded inside the pod via a declaration like:
+
+```yaml
+    envFrom:
+    - secretRef:
+        name: s3-bucket-secret
+```
+
+and the secret is built with the following template or the kubectl CLI.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-creds
+type: Opaque
+data:
+  AWS_ACCESS_KEY_ID:
+  AWS_SECRET_ACCESS_KEY:
+  AWS_SESSION_TOKEN: 
+```
+
+
+The main approach is to use the [IAM Role Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html) capability to get the temporary token.
