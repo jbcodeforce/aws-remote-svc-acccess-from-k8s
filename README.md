@@ -8,7 +8,55 @@ We want to access a remote AWS service like ECR to get an image scheduled to a K
 
 The second challenge is how to access any AWS service, like S3, from pods running on remote Kubernetes running on another cloud provider. 
 
-All communications are vover public internet.
+All communications are over public internet.
+
+## Demonstration preparation
+
+As a pre-requisite you can build a docker image from the [simple python program]() that will be deploy on your Kubernetes cluster and it will list the S3 buckets in your account. The code source is in the `src` folder. 
+
+You can prepare for the demonstration using a set of elements from this repository but see the next sectons for more details:
+
+* We assume you have aws CLI and you configured your access to AWS. You should set the temporary access token, access key id and access key secret in environment variables
+
+  ```sh
+  export AWS_ACCESS_KEY_ID=AS....EM
+  export AWS_SECRET_ACCESS_KEY=fE.....lN
+  export AWS_SESSION_TOKEN=IQoJ......v02SJ
+  ```
+
+* Run CDK to create IAM user, Policy, ECR repository. for that use the script and custom image:
+
+  ```sh
+  # under cdk folder
+  ./startPythonAWSEnv.sh
+  # Verify you can see your buckets
+  aws s3 ls
+  # in the shell use cdk CLI
+  cdk deploy
+  ```
+
+  This should generate a CloudFormation template named `EcrAccessSample` and then the resources in IAM and ECR, matching the description in next section.
+
+* Build the image with the name of the ECR repository: (change `your_aws_account_id` below)
+
+  ```sh
+  cd src
+  docker build -t your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com/jbcodeforce/s3bucketlist .
+  ```
+
+* Login to docker: (change `your_aws_account_id` below)
+
+  ```sh
+  aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin  your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com
+
+  ```
+
+* Push the image that we will use later to test kubernetes to S3 connection: (change `your_aws_account_id` below)
+
+  ```sh
+  docker push your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com/jbcodeforce/s3bucketlist
+  ```
+
 
 ## ECR remote access
 
@@ -69,7 +117,7 @@ A developer or CI/CD pipeline can push image to the registry/repository using th
     aws configure 
     aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin your_aws_account_id.dkr.ecr.us-west-2.amazonaws.com
     # The following command should fail
-    docker pull <accountID>.dkr.ecr.us-west-2.amazonaws.com/jbcodeforce/autonomous-car-ride
+    docker pull <accountID>.dkr.ecr.us-west-2.amazonaws.com/jbcodeforce/s3bucketlist
     # with error like
     # denied: User: arn:aws:iam::403993201276:user/ecruser is not authorized to perform: ecr:BatchGetImage on resource...
     ```

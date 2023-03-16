@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: jb-s3-bucket-ls
+spec:
+  containers:
+    image: quay.io/ibmcase/jb-s3-bucket-ls
+    imagePullPolicy: Always
+    imagePullSecrets:
+    - name: aws-cred-secret
+    envFrom:
+    - secretRef:
+        name: s3-bucket-secret
+    name: jb-s3-bucket-ls
+
