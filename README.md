@@ -1,4 +1,4 @@
-# Access AWS service from a k8s cluster running over the internet
+# Remote access to AWS services from a k8s cluster (over the internet)
 
 ## Problems
 
