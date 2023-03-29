@@ -4,12 +4,13 @@ metadata:
   name: jb-s3-bucket-ls
 spec:
   containers:
-    image: quay.io/ibmcase/jb-s3-bucket-ls
+  - name: jb-s3-bucket-ls
+    image: ACCOUNTID.dkr.ecr.us-west-2.amazonaws.com/s3bucketlist
     imagePullPolicy: Always
-    imagePullSecrets:
-    - name: aws-cred-secret
     envFrom:
     - secretRef:
         name: s3-bucket-secret
-    name: jb-s3-bucket-ls
+  imagePullSecrets:
+    - name: aws-ecr
+    
 

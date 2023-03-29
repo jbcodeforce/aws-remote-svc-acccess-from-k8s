@@ -1,6 +1,6 @@
 from aws_cdk import (
     # Duration,
-    Stack,
+    Stack, Tag,
     aws_iam as iam,
     SecretValue,
     aws_ecr as ecr
@@ -18,15 +18,18 @@ class CdkStack(Stack):
                     iam.PolicyStatement(
                         actions= ["ecr:GetAuthorizationToken"],
                         resources=["*"]
-                    )
-                ]
+                    )],
+                policy_name="ecr-auth-token-policy"
         )
         user = iam.User(self,
                         "ecruser",
-                        password=SecretValue.unsafe_plain_text("T0ch@ngefordemo"))
-        user.attach_inline_policy(policy);
+                        user_name="ecruser",
+                        password=SecretValue.unsafe_plain_text("T0ch@ngefordemo")
+                        )
+        user.attach_inline_policy(policy)
 
         # create ECR repository
-        repository=ecr.Repository.from_repository_name(self, 
+        
+        repository= ecr.Repository.from_repository_name(self, 
                                                        "demoRepository",  
-                                                       repository_name="jbcodeforce/s3bucketlist")
+                                                       repository_name="s3bucketlist")
